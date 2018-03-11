@@ -49,12 +49,16 @@ idt_init(void) {
 
     extern uintptr_t __vectors[];
     for (int i = 0; i < 256; ++i){
-        int dpl;
+        int dpl,istrap;
         if (i == T_SYSCALL || i == T_SWITCH_TOK)
             dpl = DPL_USER;
         else
             dpl = DPL_KERNEL;
-        SETGATE(idt[i], 0, KERNEL_CS, __vectors[i], dpl);
+        if (i == T_SYSCALL)
+            istrap = 1;
+        else
+            istrap = 0;
+        SETGATE(idt[i], istrap, KERNEL_CS, __vectors[i], dpl);
     }
     lidt(&idt_pd);
 }
