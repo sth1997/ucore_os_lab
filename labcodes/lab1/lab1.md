@@ -10,93 +10,234 @@
     中断描述符表
 ```
 
-## 练习1
+## 练习1：理解通过make生成执行文件的过程
 
-### 1.1 操作系统镜像文件ucore.img是如何一步一步生成的?(需要比较详细地解释Makefile中每一条相关命令和命令参数的含义,以及说明命令导致的结果)  
-注：由于makefile涉及一些语法，描述起来不方便，直接通过 make =V查看实际执行的命令，对其进行描述  
+### 1.1 操作系统镜像文件UCORE.IMG是如何一步一步生成的？(需要比较详细地解释MAKEFILE中每一条相关命令和命令参数的含义，以及说明命令导致的结果)
 
-#### ①编译内核代码，生成obj文件  
-gcc -I\*\*\*\* -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc -fno-stack-protector -c kern/\*\*\*.c -o obj/kern/\*\*\*.o  
-参数：  
+##### 【ucore.img的生成代码】
 
-    -I\*\*\*\* 设定引用文件查找目录  
-    -fno-builtin -nostdinc 关闭内建库  
-    -Wall 开启所有警告  
-    -ggdb -gstabs 添加调试信息  
-    -m32 生成32位代码  
-    -fno-stack-protector 不生成栈保护代码  
+　　观察Makefile文件，首先找到ucore.img的生成代码：
 
-#### ②链接生成内核ELF映像  
-ld -m    elf_i386 -nostdlib -T tools/kernel.ld -o bin/kernel  obj/kern/init/init.o obj/kern/libs/stdio.o obj/kern/libs/readline.o obj/kern/debug/panic.o obj/kern/debug/kdebug.o obj/kern/debug/kmonitor.o obj/kern/driver/clock.o obj/kern/driver/console.o obj/kern/driver/picirq.o obj/kern/driver/intr.o obj/kern/trap/trap.o obj/kern/trap/vectors.o obj/kern/trap/trapentry.o obj/kern/mm/pmm.o  obj/libs/string.o obj/libs/printfmt.o  
-参数：  
 
-    -m    elf_i386生成32位ELF映像  
-    -nostdlib 关闭内建库  
-    -T tools/kernel.ld 使用链接器脚本tools/kernel.ld，这个脚本描述了代码和数据在内存中的布局，以及设定了内核入口地址  
+```shell
+UCOREIMG	:= $(call totarget,ucore.img)
+```
 
-#### ③编译bootloader代码，生成obj文件  
-gcc -Iboot/ -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc  -fno-stack-protector -Ilibs/ -Os -nostdinc -c boot/bootasm.S -o obj/boot/bootasm.o  
-gcc -Iboot/ -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc  -fno-stack-protector -Ilibs/ -Os -nostdinc -c boot/bootmain.c -o obj/boot/bootmain.o  
-参数：  
+```shell
+$(UCOREIMG): $(kernel) $(bootblock)
+	$(V)dd if=/dev/zero of=$@ count=10000
+	$(V)dd if=$(bootblock) of=$@ conv=notrunc
+	$(V)dd if=$(kernel) of=$@ seek=1 conv=notrunc
 
-    -Os 优化选项  
-    其余参数同①  
+$(call create_target,ucore.img)
+```
 
-#### ④链接生成bootloader ELF映像  
-ld -m    elf_i386 -nostdlib -N -e start -Ttext 0x7C00 obj/boot/bootasm.o obj/boot/bootmain.o -o obj/bootblock.o  
-参数：  
+　　可见，为生成ucore.img镜像文件，需首先生成kernel和bootclock。为了更好地理解Makefile的运行过程，我在Shell中执行了如下指令：
 
-    -N 设置代码段和数据段都可读可写，关闭动态链接  
-    -e start 指定入口点符号为start  
-    -Ttext 0x7C00设置代码段起始地址为0x7c00  
-    其余参数同②
+```shell
+make V=
+```
 
-#### ⑤生成bootloader二进制代码  
-objcopy -S -O binary obj/bootblock.o obj/bootblock.out  
-参数：  
+　　这条指令是Makefile的调试指令，显示出了Makefile的整个执行过程。以下将结合执行过程进行分析。
 
-    -S 不拷贝重定位信息和调试信息  
-    -O binary拷贝二进制代码  
-    obj/bootblock.o obj/bootblock.out将ELF格式的obj/bootblock.o文件中的代码段拷贝到obj/bootblock.out
+##### 【bootblock的生成代码】
 
-#### ⑥生成启动扇区  
-首先，生成tools/sign工具  
-gcc -Itools/ -g -Wall -O2 -c tools/sign.c -o obj/sign/tools/sign.o  
-gcc -g -Wall -O2 obj/sign/tools/sign.o -o bin/sign  
-之后，使用sign工具检查obj/bootblock.out文件的大小是否超过510字节，生成启动扇区bin/bootblock（该命令没有输出出来，所以从Makefile文件中复制过来）  
-@$(call totarget,sign) $(call outfile,bootblock) $(bootblock)  
-参数： 
+```shell
+$(bootblock): $(call toobj,$(bootfiles)) | $(call totarget,sign)
+	@echo + ld $@
+	$(V)$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 $^ -o $(call toobj,bootblock)
+	@$(OBJDUMP) -S $(call objfile,bootblock) > $(call asmfile,bootblock)
+	@$(OBJCOPY) -S -O binary $(call objfile,bootblock) $(call outfile,bootblock)
+	@$(call totarget,sign) $(call outfile,bootblock) $(bootblock)
+```
 
-    -O2 优化选项  
-    -Wall 开启所有警告  
-    -g 生成可为gdb调试用的文件，包含调试信息  
+　　在执行过程中的相应指令如下：
 
-#### ⑦初始化磁盘镜像文件  
-dd if=/dev/zero of=bin/ucore.img count=10000  
-参数：  
+```shell
+ld -melf_i386 -nostdlib -N -e start -Ttext 0x7C00 obj/boot/bootasm.o obj/boot/bootmain.o -o obj/bootblock.o
+```
 
-    if=/dev/zero 将一个全零的设备文件当作输入文件  
-    of=bin/ucore.img 将bin/ucore.img当作输出文件  
-    count=10000 共10000个block（每个block默认512B）  
+　　由此可见，要生成bootblock，首先需要生成相关的.o文件：bootasm.o、bootmain.o，以及sign工具。
 
-#### ⑧将启动扇区映像写入镜像文件  
-dd if=bin/bootblock of=bin/ucore.img conv=notrunc  
-参数：  
+###### bootasm.o，bootmain.o的生成代码
 
-    if=bin/bootblock 将⑥生成的启动扇区文件当作输入文件  
-    of=bin/ucore.img 将bin/ucore.img当作输出文件  
-    conv=notrunc 不截短输出文件  
+```shell
+bootfiles = $(call listf_cc,boot)
+$(foreach f,$(bootfiles),$(call cc_compile,$(f),$(CC),$(CFLAGS) -Os -nostdinc))
+```
 
-#### ⑨将内核映像写入镜像文件  
-dd if=bin/kernel of=bin/ucore.img seek=1 conv=notrunc  
-参数：  
+　　在执行过程中的相应指令如下：
 
-    seek=1 从输出文件开头跳过1个block后开始复制（最开头的1个block512B用来存放启动扇区映像）  
-    其余参数同⑧
+```shell
+【bootasm.o】
+gcc -Iboot/ -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc  -fno-stack-protector -Ilibs/ -Os -nostdinc -c boot/bootasm.S -o obj/boot/bootasm.o
+【bootmain.o】
+gcc -Iboot/ -fno-builtin -Wall -ggdb -m32 -gstabs -nostdinc  -fno-stack-protector -Ilibs/ -Os -nostdinc -c boot/bootmain.c -o obj/boot/bootmain.o
+```
 
-### 1.2 一个被系统认为是符合规范的硬盘主引导扇区的特征是什么?
-从sign.c的代码可看出，一个符合规范的硬盘主引导扇区应有512B。  
-其中，第511个字节为0x55，第512个字节为0xAA。（假设字节下标从1开始）
+　　其中关键的参数有：
+
+-  -I(+dir)　添加搜索头文件的路径
+-  -fno-builtin　除非__builtin_前缀出现，否则不进行內建函数优化
+-  -ggdb　生成可供gdb使用的调试信息，以便使用qemu+gdb来调试bootloader和ucore
+-  -m32　生成适用于X86-32环境的代码，这是为了使操作系统符合模拟硬件（32位的80386）的要求
+-  -gstabs　生成stabs格式的调试信息，使用ucore的monitor可以显示出相应的信息
+-  -nostdinc　不使用标准库（因为标准库是给应用程序用的）
+-  -fno-stack-protector　不生成用于检测缓冲区溢出的代码
+-  -Os　为减小代码大小而进行优化
+
+###### sign工具的生成代码
+
+```shell
+$(call add_files_host,tools/sign.c,sign,sign)
+$(call create_target_host,sign,sign)
+```
+
+　　在执行过程中的相应指令如下：
+
+```shell
+gcc -Itools/ -g -Wall -O2 -c tools/sign.c -o obj/sign/tools/sign.o
+gcc -g -Wall -O2 obj/sign/tools/sign.o -o bin/sign
+```
+
+　　其中主要的参数有：
+
+- -g　利用操作系统的“原生格式”生成调试信息
+- -Wall　打开警报（Warning）开关
+- -O2　优化算法，提高代码的运行速度
+
+###### 进一步生成bin/bootblock
+
+　　在生成好bootasm.o、bootmain.o以及sign工具后，将继续执行如下步骤：
+
+　　(a) 首先生成bootblock.o，执行过程中的相应指令为：
+
+```shell
+ld -m    elf_i386 -nostdlib -N -e start -Ttext 0x7C00 obj/boot/bootasm.o obj/boot/bootmain.o -o obj/bootblock.o
+```
+
+　　其中关键的参数有：
+
+- `-m elf_i386`　表示模拟i386上的连接器（在64位Linux机器上用gcc编译32位程序时需加-m32，ld指令则加-m elf_i386）
+- -nostdlib　不使用标准库
+- -N　设置代码段和数据段均可读写
+- -e (+entry)　指定入口
+- -Ttext　指定代码段开始位置
+
+　　(b) 然后拷贝二进制代码bin/bootblock.o到obj/bootblock.out，提示信息为：
+
+```shell
+'obj/bootblock.out' size: 472 bytes
+```
+
+　　(c) 最后使用sign工具处理bootblock.out，生成最后的bootblock，提示信息为（注意到此时bootblock的大小恰为512字节）：
+
+```shell
+build 512 bytes boot sector: 'bin/bootblock' success!
+```
+
+
+##### 【kernel的生成代码】
+
+```shell
+$(kernel): tools/kernel.ld
+$(kernel): $(KOBJS)
+	@echo + ld $@
+	$(V)$(LD) $(LDFLAGS) -T tools/kernel.ld -o $@ $(KOBJS)
+	@$(OBJDUMP) -S $@ > $(call asmfile,kernel)
+	@$(OBJDUMP) -t $@ | $(SED) '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $(call symfile,kernel)
+```
+
+　　在执行过程中的相应指令如下：
+
+```shell
+ld -melf_i386 -nostdlib -T tools/kernel.ld -o bin/kernel  obj/kern/init/init.o
+obj/kern/libs/readline.o obj/kern/libs/stdio.o
+obj/kern/debug/kdebug.o obj/kern/debug/kmonitor.o 
+obj/kern/debug/panic.o obj/kern/driver/clock.o
+obj/kern/driver/console.o obj/kern/driver/intr.o
+obj/kern/driver/picirq.o obj/kern/trap/trap.o
+obj/kern/trap/trapentry.o obj/kern/trap/vectors.o 
+obj/kern/mm/pmm.o  obj/libs/printfmt.o 
+obj/libs/string.o
+```
+
+　　其中新出现的重要参数为：
+
+- -T (+scriptfile)　让连接器使用指定的脚本
+
+　　可见，为生成kernel，首先需要生成kernel.ld和一系列相关的.o文件，其中kernel.ld已存在于tools/路径下。
+
+　　生成相关.o文件的代码如下：
+​    
+```shell
+$(call add_files_cc,$(call listf_cc,$(KSRCDIR)),kernel,$(KCFLAGS))
+```
+
+　　以trap.o为例（其他.o文件的生成过程类似），其执行过程中的相应指令如下：
+
+```shell
+gcc -Ikern/trap/ -fno-builtin -Wall -ggdb -m32
+-gstabs -nostdinc  -fno-stack-protector 
+-Ilibs/ -Ikern/debug/ -Ikern/driver/ -Ikern/trap/ -Ikern/mm/ 
+-c kern/trap/trap.c -o obj/kern/trap/trap.o
+```
+
+
+##### 【最后：将bootblock和kernel拷贝到ucore.img中】
+
+　　dd是 Linux/UNIX 下的一个非常有用的命令，作用是用指定大小的块拷贝一个文件，并在拷贝的同时进行指定的转换。
+
+　　首先，生成10000个块的文件，每个块默认512字节，用0填充。
+
+```shell
+dd if=/dev/zero of=bin/ucore.img count=10000
+```
+
+　　其中参数解释如下：
+
+- if= 输入文件路径
+- of= 输出文件路径
+- count=(+blocks) 仅拷贝blocks个块，块大小等于ibs指定的字节数，这里默认512字节
+
+　　随后，将bootblock的内容写入ucore.img的第一个块，再从第二个块开始写入kernel的全部内容：
+
+```shell
+dd if=bin/bootblock of=bin/ucore.img conv=notrunc
+dd if=bin/kernel of=bin/ucore.img seek=1 conv=notrunc
+```
+
+　　其中参数解释如下：
+
+- conv=(+conversion) 用指定参数转换文件
+- notrunc 不截断输出文件
+- seek=(+blocks) 从输出文件开头跳过blocks个块后再开始复制
+
+　　**至此，便完成了操作系统镜像文件ucore.img的全部生成过程。**
+
+
+### 1.2 一个被系统认为是符合规范的硬盘主引导扇区的特征是什么？
+
+　　硬盘主引导扇区（bootblock）的规范性检测和标注，是在sign.c中完成的。其对应的命令行指令为：
+
+```shell
+bin/sign obj/bootblock.out bin/bootblock
+```
+
+　　阅读sign.c的代码可知，其首先对bootblock.out文件进行了**大小检测**，以确保bootloader的原始代码小于510字节。
+
+　　其次，它将bootblock.out读入512字节大小的char* buf中，并对buf末尾的两个字节进行了**特殊标记**：
+
+```c
+buf[510] = 0x55;
+buf[511] = 0xAA;
+```
+
+　　最后，再将标记后的bootblock.out写入到最终的bootblock可执行文件中。
+
+　　若能顺利执行到此，则系统保证了该硬盘主引导扇区是符合规范的。**其特征即为最后的特殊标记。**
+
+
 
 ## 练习2
 
