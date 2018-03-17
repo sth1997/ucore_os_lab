@@ -305,7 +305,6 @@ print_stackframe(void) {
       */
     uint32_t ebp = read_ebp();
     uint32_t eip = read_eip();
-    uint32_t * addr = (uint32_t *)ebp;
     print_debuginfo(eip - 1);
     while (ebp != 0){
         cprintf("ebp:0x%08x eip:0x%08x args:", ebp, eip);
