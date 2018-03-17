@@ -396,6 +396,29 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
         }
    }
 #endif
+    ptep = get_pte(mm->pgdir, addr, 1);
+    if (!ptep) //没有足够的物理空间分配页表项
+        goto failed;
+    if (*ptep == 0){ //该线性地址与物理地址尚未建立映射或者已经撤销
+        struct Page* p = pgdir_alloc_page(mm->pgdir, addr, perm); //分配一个新物理页，并建立虚拟地址到此物理页的映射
+        if (!p) //没有足够的物理空间分配页
+            goto failed;
+        memset((void*) addr, 0, PGSIZE); //页初始化
+    }
+    else{
+        if(swap_init_ok){
+            struct Page* page = NULL;
+            if ((ret = swap_in(mm, addr, &page)) != 0)
+                goto failed;
+            page_insert(mm->pgdir, page, addr, perm);
+            swap_map_swappable(mm, addr, page, 1);
+            page->pra_vaddr = addr;
+        }
+        else{
+            cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
+            goto failed;
+        }
+    }
    ret = 0;
 failed:
     return ret;
