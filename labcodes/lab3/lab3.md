@@ -55,12 +55,16 @@ do_pgfault()函数是缺页异常的中断处理例程。产生异常的原因�
 swap_map_swappable(mm, addr, page, 1); 
 page->pra_vaddr = addr; //used when being swaped out
 ```
-- - 这里首先调用统一接口`swap_map_swappable()`维护可替换的物理页序列，即将新换入的物理页放到页替换算法的“替换序列”中，方便之后按顺序换出。
-  - 其次是标记此物理页对应的虚拟地址。
+- 这里首先调用统一接口`swap_map_swappable()`维护可替换的物理页序列，即将新换入的物理页放到页替换算法的“替换序列”中，方便之后按顺序换出。
+- 其次是标记此物理页对应的虚拟地址。
+
+我的实现与答案相同。
 
 
 对于FIFO算法，练习2主要实现`_fifo_map_swappable()`和`_fifo_swap_out_victim()`两个函数。这里要维护的可替换物理序列即为双向链表`pra_list_head`，每一个物理页对应的表项为`struct Page`的`pra_page_link`元素。  
 对于最简单的FIFO替换算法，在`_fifo_map_swappable()`中只需每次将新换入的物理页插入队尾，而在`_fifo_swap_out_victim()`中只需取出队头，得到其物理页，再从链表中删除这个队头。
+
+我的实现与答案相同。
 
 ### extended clock页替换算法
 我认为现有的swap_manager框架已经足以支持在ucore中实现此算法。在之后的报告中，将改进的时钟替换算法简称为EC算法。
